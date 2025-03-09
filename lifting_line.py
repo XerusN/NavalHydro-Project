@@ -45,6 +45,15 @@ def import_a0(path: str) -> np.array:
     data = np.loadtxt(path)
     return data[:, 1]
 
+def import_geometry(path: list) -> Geometry:
+    data = np.loadtxt(path, skiprows=1, delimiter=',')
+    for i in range(len(data[:, 0])):
+        if data[i, 0] == 0.7:
+            id_07 = i
+            return Geometry(data[:, 0], data[:, 1], data[:, 2], data[:, 3], i)
+    print('No value at r/R = 0.7')
+    exit
+    
 # Linear foil theory
 # Expects angles in radian
 def cl_from_a(a: float, a0: float):
@@ -57,6 +66,9 @@ def n_v_from_j_rn(j: float, rn07: float, water: Fluid, prop_c: PropellerCharacte
     v = j*n*prop_c.d
     return n, v
     
-def __main__():
-    rn = 9.78e7
-    prop_c = PropellerCharacteristics
+
+rn = 9.78e7
+prop_c = PropellerCharacteristics(4.65, 4, 1.1, 0.65)
+water = Fluid(1025, 1.08e-6, 2160, 101325)
+geo = import_geometry("../../ProvidedFiles/Geometry.txt")
+print(geo.c_d)
