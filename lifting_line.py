@@ -62,13 +62,16 @@ def cl_from_a(a: float, a0: float):
 
 # n and V from Reynolds and j?
 def n_v_from_j_rn(j: float, rn07: float, water: Fluid, prop_c: PropellerCharacteristics, geo: Geometry) -> float:
-    n = rn07*geo.c_d[geo.id_07]*prop_c.d**2/water.kin_visc/np.sqrt(j**2+0.7**2/(2*pi)**2)
+    n = rn07*geo.c_d[geo.id_07]/prop_c.d**2*water.kin_visc/np.sqrt(j**2+0.7**2/(2*pi)**2)
     v = j*n*prop_c.d
     return n, v
     
 
-rn = 9.78e7
+rn07 = 9.78e7
 prop_c = PropellerCharacteristics(4.65, 4, 1.1, 0.65)
 water = Fluid(1025, 1.08e-6, 2160, 101325)
 geo = import_geometry("../../ProvidedFiles/Geometry.txt")
-print(geo.c_d)
+
+j = np.linspace(0.4, 1.0, 7)
+print(water.kin_visc)
+print(n_v_from_j_rn(j, rn07, water, prop_c, geo))
