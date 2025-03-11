@@ -5,4 +5,4 @@ def rad_to_deg(a: float) -> float:
     return a*180./pi
 
 def deg_to_rad(a: float) -> float:
-    return a*180./pi
+    return a*pi/180.
