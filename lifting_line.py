@@ -47,10 +47,34 @@ class Propeller:
         self.char = char
         self.geo = geo
 
-# Used to import precomputed a_0 values with xfoil
-def import_a0(path: str) -> np.array:
-    data = np.loadtxt(path)
-    return data[:, 1]
+# Used to import precomputed cl values with xfoil
+def import_cl(path) -> np.array:
+    cl_a = []
+    data = np.loadtxt(path+'results_167.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    data = np.loadtxt(path+'results_200.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    data = np.loadtxt(path+'results_300.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    data = np.loadtxt(path+'results_350.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    data = np.loadtxt(path+'results_400.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    data = np.loadtxt(path+'results_450.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    data = np.loadtxt(path+'results_500.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    data = np.loadtxt(path+'results_550.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    data = np.loadtxt(path+'results_600.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    data = np.loadtxt(path+'results_700.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    data = np.loadtxt(path+'results_800.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    data = np.loadtxt(path+'results_900.txt', skiprows=2, delimiter = '|')
+    cl_a.append(data)
+    return np.array(cl_a)
 
 def import_geometry(path: list) -> Geometry:
     data = np.loadtxt(path, skiprows=1, delimiter=',')
@@ -63,13 +87,18 @@ def import_geometry(path: list) -> Geometry:
     
 # Linear foil theory
 # Expects angles in radian
-def cl_from_aoa(a: float, a0: float):
-    return 2*pi*(a - a0)
+def cl_from_a0(a: float, section):
+    a0 = []         #Put precomputed a0 values
+    return 2*pi*(a - a0[section])
 
+def cl_from_xfoil(a: float, cl_a, section: int):
+    cl = np.interp(rad_to_deg(a), cl_a[section, :, 0], cl_a[section, :, 1])
+    print(rad_to_deg(a), cl)
+    return cl
 
 # n and V from Reynolds and j?
-def n_v_from_j_rn(j: float, rn07: float, water: Fluid, prop: Propeller) -> float:
-    n = rn07*prop.geo.c_d[prop.geo.id_07]/prop.char.d**2*water.kin_visc/np.sqrt(j**2+0.7**2/(2*pi)**2)
+def n_v_from_j_rn(j: float, rn07: float, water: Fluid, prop: Propeller):
+    n = rn07/prop.geo.c_d[prop.geo.id_07]/prop.char.d**2*water.kin_visc/np.sqrt(j**2+0.7**2*pi**2)
     v = j*n*prop.char.d
     return n, v
 
@@ -87,7 +116,6 @@ def rn(v: float, l: float, nu: float):
     return v*l/nu
 
 def cf(v_inf: float, prop: Propeller, water: Fluid, section: int):
-    print(rn(v_inf, prop.geo.c_d[section]*prop.char.d, water.kin_visc))
     return 0.075/(np.log10(rn(v_inf, prop.geo.c_d[section]*prop.char.d, water.kin_visc))-2.)**2
 
 def cd_ittc(v_inf: float, prop: Propeller, water: Fluid, section: int):
@@ -100,16 +128,30 @@ def dr_section(prop: Propeller, section: int):
         return (prop.geo.r_R[section+1] - prop.geo.r_R[section])/2.*prop.char.d/2.
     return ((prop.geo.r_R[section+1] - prop.geo.r_R[section])/2. + (prop.geo.r_R[section] - prop.geo.r_R[section-1])/2.)*prop.char.d/2.
     
+def export(filename: str, j, kt, kq, eta):
+    export = []
+    for i in range(len(j)):
+        export.append([j[i], kt[i], kq[i], eta[i]])
+    export = np.array(export)
+
+    np.savetxt('./output/'+filename, export, header='j  kt  kq  eta')
     
-def q2():
+def setup():
     rn07 = 9.78e7
     prop_c = PropellerCharacteristics(4.65, 4, 1.1, 0.65)
     water = Fluid(1025, 1.08e-6, 2160, 101325)
-    geo = import_geometry("../../ProvidedFiles/Geometry.txt")
+    geo = import_geometry("./input/Geometry.txt")
 
     prop = Propeller(geo, prop_c)
 
     j = np.linspace(0.4, 1.0, 7)
+    
+    cl_a = import_cl('./input/')
+    return rn07, water, prop, j, cl_a
+
+def q2():
+    
+    rn07, water, prop, j, cl_a = setup()
 
     n, v = n_v_from_j_rn(j, rn07, water, prop)
 
@@ -120,8 +162,10 @@ def q2():
         beta = beta_mean(n, v, prop, section)
         aoa_ = aoa(beta, prop, section)
         #Fixed value of a0 for test purpose
-        cl = cl_from_aoa(aoa_, 0.)
+        #cl = cl_from_a0(aoa_, section)
+        cl = cl_from_xfoil(aoa_, cl_a, section)
         v_inf = np.sqrt(v**2 + (prop.geo.r_R[section]*prop.char.d*pi*n)**2)
+        #print(section, rn(v_inf, prop.geo.c_d[section]*prop.char.d, water.kin_visc))
         cd = cd_ittc(v_inf, prop, water, section)
         dr = dr_section(prop, section)
         dD = water.density/2.*v_inf**2*cd*prop.geo.c_d[section]*prop.char.d*dr
@@ -134,12 +178,8 @@ def q2():
         
     kt = T /(water.density * n**2 * prop.char.d**4)
     kq = Q /(water.density * n**2 * prop.char.d**5)
-
-    export = []
-    for i in range(len(j)):
-        export.append([j[i], kt[i], kq[i]])
-    export = np.array(export)
-
-    np.savetxt('q2.txt', export, header='j  kt  kq')
+    eta = kt*j/(kq*2*pi)
+    
+    export('q2.txt', j, kt, kq, eta)
 
 q2()
