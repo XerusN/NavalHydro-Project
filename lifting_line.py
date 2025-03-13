@@ -105,7 +105,7 @@ def n_v_from_j_rn(j: float, rn07: float, water: Fluid, prop: Propeller):
 def geo_pitch_angle(prop: Propeller, section: int):
     return np.arctan(prop.geo.p_d[section]/(pi*prop.geo.r_R[section]))    # Lecture 12-8
 
-def beta_mean(n: float, v: float, prop: Propeller, section: int):
+def beta_mean(n: float, v: float, prop: Propeller, section: int):       #Correction exercise 6
     return np.arctan(v/(prop.geo.r_R[section]*prop.char.d*pi*n))
 
 def aoa(beta: float, prop: Propeller, section: int):
@@ -116,6 +116,7 @@ def rn(v: float, l: float, nu: float):
     return v*l/nu
 
 def cf(v_inf: float, prop: Propeller, water: Fluid, section: int):
+    #return 0.075/(np.log10(9.78e7)-2.)**2
     return 0.075/(np.log10(rn(v_inf, prop.geo.c_d[section]*prop.char.d, water.kin_visc))-2.)**2
 
 def cd_ittc(v_inf: float, prop: Propeller, water: Fluid, section: int):
@@ -144,7 +145,7 @@ def setup():
 
     prop = Propeller(geo, prop_c)
 
-    j = np.linspace(0.4, 1.0, 7)
+    j = np.linspace(0.4, 1.1, 8)
     
     cl_a = import_cl('./input/')
     return rn07, water, prop, j, cl_a
@@ -155,20 +156,23 @@ def q2():
 
     n, v = n_v_from_j_rn(j, rn07, water, prop)
     
+    #print(n, v)
+    
     T = np.zeros(len(n))
     Q = np.zeros(len(n))
     r = 0   #debug
+    T5 = []    #debug
+    Q5 = []    #debug
     # Iterate through the blade sections
     for section in range(len(prop.geo.r_R)-1):
         beta = beta_mean(n, v, prop, section)
         aoa_ = aoa(beta, prop, section)
-        #Fixed value of a0 for test purpose
-        #cl = cl_from_a0(aoa_, section)
-        cl = cl_from_xfoil(aoa_, cl_a, section)/5.
+        #print(rad_to_deg(beta), rad_to_deg(aoa_))
+        #print(aoa_)
+        cl = cl_from_xfoil(aoa_, cl_a, section)
         v_inf = np.sqrt(v**2 + (prop.geo.r_R[section]*prop.char.d*pi*n)**2)
-        #print(section, rn(v_inf, prop.geo.c_d[section]*prop.char.d, water.kin_visc))
         cd = cd_ittc(v_inf, prop, water, section)
-        print(cl, cd)
+        #print(cl, cd)
         dr = dr_section(prop, section)
         #print(dr)
         r+= dr  #debug
@@ -179,12 +183,21 @@ def q2():
         dQ = prop.geo.r_R[section]*prop.char.d*(dL*np.sin(beta) + dD*np.cos(beta))/2.
         T += dT
         Q += dQ
+        #print(dT, dQ)
         
-    kt = T /(water.density * n**2 * prop.char.d**4)
-    kq = Q /(water.density * n**2 * prop.char.d**5)
+        T5.append(dT[5])    #debug
+        Q5.append(dQ[5])    #debug
+        
+    kt = T*prop.char.z /(water.density * n**2 * prop.char.d**4)
+    kq = Q*prop.char.z /(water.density * n**2 * prop.char.d**5)
     eta = kt*j/(kq*2*pi)
     
-    print(r, prop.char.d*(1-prop.geo.r_R[0])/2.)
+    # plt.plot(prop.geo.r_R[:-1], T5, label = 'T')    #debug
+    # plt.plot(prop.geo.r_R[:-1], Q5, label = 'Q')    #debug
+    # plt.legend()    #debug
+    # plt.show()    #debug
+    
+    #print(r, prop.char.d*(1-prop.geo.r_R[0])/2.)
     
     export('q2.txt', j, kt, kq, eta)
 
