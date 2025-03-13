@@ -93,7 +93,7 @@ def cl_from_a0(a: float, section):
 
 def cl_from_xfoil(a: float, cl_a, section: int):
     cl = np.interp(rad_to_deg(a), cl_a[section, :, 0], cl_a[section, :, 1])
-    print(rad_to_deg(a), cl)
+    #print(rad_to_deg(a), cl)
     return cl
 
 # n and V from Reynolds and j?
@@ -123,7 +123,7 @@ def cd_ittc(v_inf: float, prop: Propeller, water: Fluid, section: int):
 
 def dr_section(prop: Propeller, section: int):
     if section == len(prop.geo.r_R) - 2:
-        return (prop.geo.r_R[section + 1] - prop.geo.r_R[section])*prop.char.d/2.
+        return (prop.geo.r_R[section + 1] - prop.geo.r_R[section-1])*3./4.*prop.char.d/2.
     if section == 0:
         return (prop.geo.r_R[section+1] - prop.geo.r_R[section])/2.*prop.char.d/2.
     return ((prop.geo.r_R[section+1] - prop.geo.r_R[section])/2. + (prop.geo.r_R[section] - prop.geo.r_R[section-1])/2.)*prop.char.d/2.
@@ -154,31 +154,37 @@ def q2():
     rn07, water, prop, j, cl_a = setup()
 
     n, v = n_v_from_j_rn(j, rn07, water, prop)
-
+    
     T = np.zeros(len(n))
     Q = np.zeros(len(n))
+    r = 0   #debug
     # Iterate through the blade sections
     for section in range(len(prop.geo.r_R)-1):
         beta = beta_mean(n, v, prop, section)
         aoa_ = aoa(beta, prop, section)
         #Fixed value of a0 for test purpose
         #cl = cl_from_a0(aoa_, section)
-        cl = cl_from_xfoil(aoa_, cl_a, section)
+        cl = cl_from_xfoil(aoa_, cl_a, section)/5.
         v_inf = np.sqrt(v**2 + (prop.geo.r_R[section]*prop.char.d*pi*n)**2)
         #print(section, rn(v_inf, prop.geo.c_d[section]*prop.char.d, water.kin_visc))
         cd = cd_ittc(v_inf, prop, water, section)
+        print(cl, cd)
         dr = dr_section(prop, section)
+        #print(dr)
+        r+= dr  #debug
         dD = water.density/2.*v_inf**2*cd*prop.geo.c_d[section]*prop.char.d*dr
         dL = water.density/2.*v_inf**2*cl*prop.geo.c_d[section]*prop.char.d*dr
-        
+        #print(dL, dD)
         dT = dL*np.cos(beta) - dD*np.sin(beta)
-        dQ = prop.geo.r_R[section]*prop.char.d*(dL*np.sin(beta) + dD*np.cos(beta))
+        dQ = prop.geo.r_R[section]*prop.char.d*(dL*np.sin(beta) + dD*np.cos(beta))/2.
         T += dT
         Q += dQ
         
     kt = T /(water.density * n**2 * prop.char.d**4)
     kq = Q /(water.density * n**2 * prop.char.d**5)
     eta = kt*j/(kq*2*pi)
+    
+    print(r, prop.char.d*(1-prop.geo.r_R[0])/2.)
     
     export('q2.txt', j, kt, kq, eta)
 
