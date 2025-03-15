@@ -216,61 +216,73 @@ def q3():
     T = np.zeros(len(n))
     Q = np.zeros(len(n))
     r = 0   #debug
-    T5 = []    #debug
-    Q5 = []    #debug
     
     for i in range(len(j)):
         k = 0
         rel_diff = 1.
         ut = np.zeros(len(prop.geo.r_R)-1)
-        
         ua = np.zeros(len(prop.geo.r_R)-1)
         
-        gamma = np.zeros(len(prop.geo.r_R)-1)
+        gamma = np.ones(len(prop.geo.r_R)-1)*0.1
+        gamma[0] = 0.
         gamma_new = np.zeros(len(prop.geo.r_R)-1)
         cl = np.zeros(len(prop.geo.r_R)-1)
+        cd = np.zeros(len(prop.geo.r_R)-1)
         dT = np.zeros(len(prop.geo.r_R)-1)
         dQ = np.zeros(len(prop.geo.r_R)-1)
         while k < max_it and rel_diff > tol:
-            if k == 0:
-                ut[:] = 0.
-                ua[:] = 0.1
-            else:
-                ut = gamma/(pi*prop.geo.r_R[:-1]*prop.char.d)
-                delta = v[i]**2 + ut*(2.*pi*n[i]*prop.geo.r_R[:-1]*prop.char.d-ut)
-                ua = -v[i]+np.sqrt(delta)
+            # if k == 0:
+            #     ut[:] = 0.
+            #     ua[:] = 0.1
+            # else:
+            ut = gamma/(pi*prop.geo.r_R[:-1]*prop.char.d)
+            delta = v[i]**2 + ut*(2.*pi*n[i]*prop.geo.r_R[:-1]*prop.char.d-ut)
+            ua = -v[i]+np.sqrt(delta)
             
+            #print(ut, ua)
             # Iterate through the blade sections
             for section in range(len(prop.geo.r_R)-1):
+                if ut[section] == 0.:
+                    ua[section] = 0.1
                 beta = np.arctan(ut[section]/ua[section])
+                #print(beta)
+                #print()
                 aoa_ = aoa(beta, prop, section)
                 #print(rad_to_deg(beta), rad_to_deg(aoa_))
                 #print(aoa_)
                 cl[section] = cl_from_xfoil(aoa_, cl_a, section)
             v_inf = np.sqrt((v[i] + ua/2.)**2 + (prop.geo.r_R[:-1]*prop.char.d*pi*n[i] - ut/2.)**2)
-            gamma_new = cl*v_inf*prop.geo.c_d[:-1]*prop.char.d/(2*prop.char.z)
+            for section in range(len(prop.geo.r_R)-1):
+                cd[section] = cd_ittc(v_inf[section], prop, water, section)
             
+            gamma_new = cl*v_inf*prop.geo.c_d[:-1]*prop.char.d/(2./prop.char.z)
+            print(gamma_new)
             if k == 0:
                 rel_diff = 1.
             else:
                 rel_diff = np.linalg.norm(gamma_new - gamma) / np.mean(gamma)
-            gamma = gamma_new*(1-relax) + gamma*relax
+            gamma = gamma*(1-relax) + gamma_new*relax
             
             k += 1
+            # print(aoa_)
             print(k, rel_diff)
-        
-        cd = cd_ittc(v_inf, prop, water, section)
+            print("----------")
+            
+        beta = np.arctan(ut/ua)
         dr = np.array([dr_section(prop, section) for section in range(len(prop.geo.r_R)-1)])
         dD = water.density/2.*v_inf**2*cd*prop.geo.c_d[:-1]*prop.char.d*dr
         dL = water.density/2.*v_inf**2*cl*prop.geo.c_d[:-1]*prop.char.d*dr
         #print(dL, dD)
         dT[:] = dL*np.cos(beta) - dD*np.sin(beta)
-        dQ[:] = prop.geo.r_R[section]*prop.char.d*(dL*np.sin(beta) + dD*np.cos(beta))/2.
+        dQ[:] = prop.geo.r_R[:-1]*prop.char.d*(dL*np.sin(beta) + dD*np.cos(beta))/2.
         #plt.plot(gamma)
         #plt.show()
         T[i] += dT.sum()
         Q[i] += dQ.sum()
-        
+    
+    # plt.plot(gamma)
+    # plt.show()
+    
     kt = T*prop.char.z /(water.density * n**2 * prop.char.d**4)
     kq = Q*prop.char.z /(water.density * n**2 * prop.char.d**5)
     eta = kt*j/(kq*2*pi)
