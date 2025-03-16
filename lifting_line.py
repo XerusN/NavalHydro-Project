@@ -1,5 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from InductionFactors import *
+from SingularIntegration import *
 from numpy import pi
 from utils import *
 
@@ -32,6 +34,7 @@ class Geometry:
     c_d: np.ndarray
     t_d: np.ndarray
     p_d: np.ndarray
+    # Index of the section with r/R = 0.7
     id_07: int
     def __init__(self, r_R, c_d, t_d, p_d, id_07):
         self.r_R = r_R
@@ -76,6 +79,7 @@ def import_cl(path) -> np.array:
     cl_a.append(data)
     return np.array(cl_a)
 
+# Imports the geometry
 def import_geometry(path: list) -> Geometry:
     data = np.loadtxt(path, skiprows=1, delimiter=',')
     for i in range(len(data[:, 0])):
@@ -85,18 +89,12 @@ def import_geometry(path: list) -> Geometry:
     print('No value at r/R = 0.7')
     exit
     
-# Linear foil theory
-# Expects angles in radian
-def cl_from_a0(a: float, section):
-    a0 = []         #Put precomputed a0 values
-    return 2*pi*(a - a0[section])
-
+# Interpolate Lift coefficient in the xfoil data
 def cl_from_xfoil(a: float, cl_a, section: int):
     cl = np.interp(rad_to_deg(a), cl_a[section, :, 0], cl_a[section, :, 1])
-    #print(rad_to_deg(a), cl)
     return cl
 
-# n and V from Reynolds and j?
+# n and V from prescribed Reynolds and j
 def n_v_from_j_rn(j: float, rn07: float, water: Fluid, prop: Propeller):
     n = rn07/prop.geo.c_d[prop.geo.id_07]/prop.char.d**2*water.kin_visc/np.sqrt(j**2+0.7**2*pi**2)
     v = j*n*prop.char.d
@@ -105,30 +103,35 @@ def n_v_from_j_rn(j: float, rn07: float, water: Fluid, prop: Propeller):
 def geo_pitch_angle(prop: Propeller, section: int):
     return np.arctan(prop.geo.p_d[section]/(pi*prop.geo.r_R[section]))    # Lecture 12-8
 
+# hydrodynamic pitch angle without induced velocities
 def beta_mean(n: float, v: float, prop: Propeller, section: int):       #Correction exercise 6
     return np.arctan(v/(prop.geo.r_R[section]*prop.char.d*pi*n))
 
+# computes the AoA from geometry and hydrodynamic pitch angle
 def aoa(beta: float, prop: Propeller, section: int):
     theta = geo_pitch_angle(prop, section)
     return theta - beta
 
+# Computes the reynolds number
 def rn(v: float, l: float, nu: float):
     return v*l/nu
 
+# Friction coefficient (ITTC correlation)
 def cf(v_inf: float, prop: Propeller, water: Fluid, section: int):
-    #return 0.075/(np.log10(9.78e7)-2.)**2
     return 0.075/(np.log10(rn(v_inf, prop.geo.c_d[section]*prop.char.d, water.kin_visc))-2.)**2
 
+# Drag coefficient
 def cd_ittc(v_inf: float, prop: Propeller, water: Fluid, section: int):
     return 2.*cf(v_inf, prop, water, section)*(1. + 2.*prop.geo.t_d[section]/prop.geo.c_d[section])
 
+# Computes the span of the section for integration purpose
 def dr_section(prop: Propeller, section: int):
     if section == len(prop.geo.r_R) - 2:
         return (prop.geo.r_R[section + 1] - prop.geo.r_R[section-1])*3./4.*prop.char.d/2.
     if section == 0:
         return (prop.geo.r_R[section+1] - prop.geo.r_R[section])/2.*prop.char.d/2.
     return ((prop.geo.r_R[section+1] - prop.geo.r_R[section])/2. + (prop.geo.r_R[section] - prop.geo.r_R[section-1])/2.)*prop.char.d/2.
-    
+
 def export(filename: str, j, kt, kq, eta):
     export = []
     for i in range(len(j)):
@@ -136,7 +139,8 @@ def export(filename: str, j, kt, kq, eta):
     export = np.array(export)
 
     np.savetxt('./output/'+filename, export, header='j  kt  kq  eta')
-    
+
+# import all predifined geometry and xfoil computations
 def setup():
     rn07 = 9.78e7
     prop_c = PropellerCharacteristics(4.65, 4, 1.1, 0.65)
@@ -153,69 +157,58 @@ def setup():
 def q2():
     
     rn07, water, prop, j, cl_a = setup()
-
-    n, v = n_v_from_j_rn(j, rn07, water, prop)
     
-    #print(n, v)
+    # angular and axial speed
+    n, v = n_v_from_j_rn(j, rn07, water, prop)
     
     T = np.zeros(len(n))
     Q = np.zeros(len(n))
-    r = 0   #debug
-    T5 = []    #debug
-    Q5 = []    #debug
+    
     # Iterate through the blade sections
     for section in range(len(prop.geo.r_R)-1):
+        # Lift from hydrodynamic pitch angle
         beta = beta_mean(n, v, prop, section)
         aoa_ = aoa(beta, prop, section)
-        #print(rad_to_deg(beta), rad_to_deg(aoa_))
-        #print(aoa_)
         cl = cl_from_xfoil(aoa_, cl_a, section)
         v_inf = np.sqrt(v**2 + (prop.geo.r_R[section]*prop.char.d*pi*n)**2)
+        
+        # Drag coefficient
         cd = cd_ittc(v_inf, prop, water, section)
-        #print(cl, cd)
+        
         dr = dr_section(prop, section)
-        #print(dr)
-        r+= dr  #debug
+        
+        # Drag and lift
         dD = water.density/2.*v_inf**2*cd*prop.geo.c_d[section]*prop.char.d*dr
         dL = water.density/2.*v_inf**2*cl*prop.geo.c_d[section]*prop.char.d*dr
-        #print(dL, dD)
+        
+        # Thrust and torque
         dT = dL*np.cos(beta) - dD*np.sin(beta)
         dQ = prop.geo.r_R[section]*prop.char.d*(dL*np.sin(beta) + dD*np.cos(beta))/2.
         T += dT
         Q += dQ
-        #print(dT, dQ)
-        
-        T5.append(dT[5])    #debug
-        Q5.append(dQ[5])    #debug
-        
+    
+    # K_T, K_Q and efficiency
     kt = T*prop.char.z /(water.density * n**2 * prop.char.d**4)
     kq = Q*prop.char.z /(water.density * n**2 * prop.char.d**5)
     eta = kt*j/(kq*2*pi)
     
-    # plt.plot(prop.geo.r_R[:-1], T5, label = 'T')    #debug
-    # plt.plot(prop.geo.r_R[:-1], Q5, label = 'Q')    #debug
-    # plt.legend()    #debug
-    # plt.show()    #debug
-    
-    #print(r, prop.char.d*(1-prop.geo.r_R[0])/2.)
-    
     export('q2.txt', j, kt, kq, eta)
-    
+
+# Lifting line with complete momentum theory
 def q3():
     
+    # iterations control varialbes
     max_it = 200
     tol = 1e-6
     relax = 0.1
     
     rn07, water, prop, j, cl_a = setup()
-
-    n, v = n_v_from_j_rn(j, rn07, water, prop)
     
-    #print(n, v)
+    # angular and axial speed
+    n, v = n_v_from_j_rn(j, rn07, water, prop)
     
     T = np.zeros(len(n))
     Q = np.zeros(len(n))
-    r = 0   #debug
     
     for i in range(len(j)):
         k = 0
@@ -230,33 +223,27 @@ def q3():
         cd = np.zeros(len(prop.geo.r_R)-1)
         dT = np.zeros(len(prop.geo.r_R)-1)
         dQ = np.zeros(len(prop.geo.r_R)-1)
+        
         while k < max_it and rel_diff > tol:
-            # if k == 0:
-            #     ut[:] = 0.
-            #     ua[:] = 0.1
-            # else:
+            # Induced velocities
             ut = gamma/(pi*prop.geo.r_R[:-1]*prop.char.d)
             delta = v[i]**2 + ut*(2.*pi*n[i]*prop.geo.r_R[:-1]*prop.char.d-ut)
             ua = -v[i]+np.sqrt(delta)
             
-            #print(ut, ua)
-            # Iterate through the blade sections
+            # Lift from hydrodynamic pitch angle
             for section in range(len(prop.geo.r_R)-1):
                 if ut[section] == 0.:
                     ua[section] = 0.1
                 beta = np.arctan(ut[section]/ua[section])
-                #print(beta)
-                #print()
                 aoa_ = aoa(beta, prop, section)
-                #print(rad_to_deg(beta), rad_to_deg(aoa_))
-                #print(aoa_)
                 cl[section] = cl_from_xfoil(aoa_, cl_a, section)
             v_inf = np.sqrt((v[i] + ua/2.)**2 + (prop.geo.r_R[:-1]*prop.char.d*pi*n[i] - ut/2.)**2)
+            # Drag from ittc correlation
             for section in range(len(prop.geo.r_R)-1):
                 cd[section] = cd_ittc(v_inf[section], prop, water, section)
             
+            # Gamma update, under relaxation to improve convergence
             gamma_new = cl*v_inf*prop.geo.c_d[:-1]*prop.char.d/(2./prop.char.z)
-            print(gamma_new)
             if k == 0:
                 rel_diff = 1.
             else:
@@ -264,37 +251,153 @@ def q3():
             gamma = gamma*(1-relax) + gamma_new*relax
             
             k += 1
-            # print(aoa_)
-            print(k, rel_diff)
-            print("----------")
             
+            if k % 10 == 0:
+                print(k, rel_diff)
+        print(k, rel_diff)
+        # Computation of cl and cd for the last gamma
+        ut = gamma/(pi*prop.geo.r_R[:-1]*prop.char.d)
+        delta = v[i]**2 + ut*(2.*pi*n[i]*prop.geo.r_R[:-1]*prop.char.d-ut)
+        ua = -v[i]+np.sqrt(delta)
         beta = np.arctan(ut/ua)
+        for section in range(len(prop.geo.r_R)-1):
+            if ut[section] == 0.:
+                ua[section] = 0.1
+            aoa_ = aoa(beta[section], prop, section)
+            cl[section] = cl_from_xfoil(aoa_, cl_a, section)
+        v_inf = np.sqrt((v[i] + ua/2.)**2 + (prop.geo.r_R[:-1]*prop.char.d*pi*n[i] - ut/2.)**2)
+        for section in range(len(prop.geo.r_R)-1):
+            cd[section] = cd_ittc(v_inf[section], prop, water, section)
         dr = np.array([dr_section(prop, section) for section in range(len(prop.geo.r_R)-1)])
+        
+        # Drag and lift
         dD = water.density/2.*v_inf**2*cd*prop.geo.c_d[:-1]*prop.char.d*dr
         dL = water.density/2.*v_inf**2*cl*prop.geo.c_d[:-1]*prop.char.d*dr
-        #print(dL, dD)
+        
+        # Thrust abd torque
         dT[:] = dL*np.cos(beta) - dD*np.sin(beta)
         dQ[:] = prop.geo.r_R[:-1]*prop.char.d*(dL*np.sin(beta) + dD*np.cos(beta))/2.
-        #plt.plot(gamma)
-        #plt.show()
         T[i] += dT.sum()
         Q[i] += dQ.sum()
+        
+        print("----------")
     
-    # plt.plot(gamma)
-    # plt.show()
-    
+    # K_T, K_Q and efficiency
     kt = T*prop.char.z /(water.density * n**2 * prop.char.d**4)
     kq = Q*prop.char.z /(water.density * n**2 * prop.char.d**5)
     eta = kt*j/(kq*2*pi)
     
-    # plt.plot(prop.geo.r_R[:-1], T5, label = 'T')    #debug
-    # plt.plot(prop.geo.r_R[:-1], Q5, label = 'Q')    #debug
-    # plt.legend()    #debug
-    # plt.show()    #debug
-    
-    #print(r, prop.char.d*(1-prop.geo.r_R[0])/2.)
-    
     export('q3.txt', j, kt, kq, eta)
 
+# Lifting line with induction factors
+def q4():
+    
+    # iterations control varialbes
+    max_it = 200
+    tol = 1e-6
+    relax = 0.1
+    
+    rn07, water, prop, j, cl_a = setup()
+    
+    # angular and axial speed
+    n, v = n_v_from_j_rn(j, rn07, water, prop)
+    
+    T = np.zeros(len(n))
+    Q = np.zeros(len(n))
+    
+    for i in range(len(j)):
+        k = 0
+        rel_diff = 1.
+        ut = np.zeros(len(prop.geo.r_R)-1)
+        ua = np.zeros(len(prop.geo.r_R)-1)
+        
+        gamma = np.ones(len(prop.geo.r_R)-1)*0.1
+        gamma[0] = 0.
+        gamma_new = np.zeros(len(prop.geo.r_R)-1)
+        cl = np.zeros(len(prop.geo.r_R)-1)
+        cd = np.zeros(len(prop.geo.r_R)-1)
+        dT = np.zeros(len(prop.geo.r_R)-1)
+        dQ = np.zeros(len(prop.geo.r_R)-1)
+        
+        while k < max_it and rel_diff > tol:
+            # Induced velocities
+            ut = gamma/(pi*prop.geo.r_R[:-1]*prop.char.d)
+            delta = v[i]**2 + ut*(2.*pi*n[i]*prop.geo.r_R[:-1]*prop.char.d-ut)
+            ua = -v[i]+np.sqrt(delta)
+            
+            # Lift from hydrodynamic pitch angle
+            for section in range(len(prop.geo.r_R)-1):
+                if ut[section] == 0.:
+                    ua[section] = 0.1
+                beta = np.arctan(ut[section]/ua[section])
+                aoa_ = aoa(beta, prop, section)
+                cl[section] = cl_from_xfoil(aoa_, cl_a, section)
+            v_inf = np.sqrt((v[i] + ua/2.)**2 + (prop.geo.r_R[:-1]*prop.char.d*pi*n[i] - ut/2.)**2)
+            # Drag from ittc correlation
+            for section in range(len(prop.geo.r_R)-1):
+                cd[section] = cd_ittc(v_inf[section], prop, water, section)
+            
+            # Gamma update, under relaxation to improve convergence
+            gamma_new = cl*v_inf*prop.geo.c_d[:-1]*prop.char.d/(2./prop.char.z)
+            if k == 0:
+                rel_diff = 1.
+            else:
+                rel_diff = np.linalg.norm(gamma_new - gamma) / np.mean(gamma)
+            gamma = gamma*(1-relax) + gamma_new*relax
+            
+            k += 1
+            
+            if k % 10 == 0:
+                print(k, rel_diff)
+        print(k, rel_diff)
+        
+        # Computation of cl and cd for the last gamma
+        ut = gamma/(pi*prop.geo.r_R[:-1]*prop.char.d)
+        delta = v[i]**2 + ut*(2.*pi*n[i]*prop.geo.r_R[:-1]*prop.char.d-ut)
+        ua = -v[i]+np.sqrt(delta)
+        beta = np.arctan(ut/ua)
+        for section in range(len(prop.geo.r_R)-1):
+            if ut[section] == 0.:
+                ua[section] = 0.1
+            aoa_ = aoa(beta[section], prop, section)
+            cl[section] = cl_from_xfoil(aoa_, cl_a, section)
+        v_inf = np.sqrt((v[i] + ua/2.)**2 + (prop.geo.r_R[:-1]*prop.char.d*pi*n[i] - ut/2.)**2)
+        for section in range(len(prop.geo.r_R)-1):
+            cd[section] = cd_ittc(v_inf[section], prop, water, section)
+        dr = np.array([dr_section(prop, section) for section in range(len(prop.geo.r_R)-1)])
+        
+        # Drag and lift
+        dD = water.density/2.*v_inf**2*cd*prop.geo.c_d[:-1]*prop.char.d*dr
+        dL = water.density/2.*v_inf**2*cl*prop.geo.c_d[:-1]*prop.char.d*dr
+        
+        # Thrust abd torque
+        dT[:] = dL*np.cos(beta) - dD*np.sin(beta)
+        dQ[:] = prop.geo.r_R[:-1]*prop.char.d*(dL*np.sin(beta) + dD*np.cos(beta))/2.
+        T[i] += dT.sum()
+        Q[i] += dQ.sum()
+        
+        print("----------")
+    
+    # K_T, K_Q and efficiency
+    kt = T*prop.char.z /(water.density * n**2 * prop.char.d**4)
+    kq = Q*prop.char.z /(water.density * n**2 * prop.char.d**5)
+    eta = kt*j/(kq*2*pi)
+    
+    export('q4.txt', j, kt, kq, eta)
+    
+print("***************************")
+print("q2")
+print("***************************")
 q2()
+print()
+print("***************************")
+print("q3")
+print("***************************")
+print()
 q3()
+print()
+print("***************************")
+print("q4")
+print("***************************")
+print()
+q4()
