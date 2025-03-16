@@ -15,6 +15,7 @@ def inductionFactors(r, r0, beta_i, Z):
 		i_T = np.sin(beta_i)
 	else:
 		p = 1+(x_x0**2/np.tan(beta_i)**2)
+		#print((p**0.5-1)*(1/np.sin(beta_i)-1)**(-1)*x0_x)
 		u = np.exp(Z*(np.log((p**0.5-1)*(1/np.sin(beta_i)-1)**(-1)*x0_x)+p**0.5-1/np.sin(beta_i)))    
 		g = (np.sin(beta_i))**3*(2+9/(np.tan(beta_i)**2))+(3*p-5)*p**(-3/2)
 		f = np.sin(beta_i)**(-0.5)*p**(-0.25)
