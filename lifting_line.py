@@ -295,7 +295,7 @@ def q4():
     # iterations control varialbes
     max_it = 200
     tol = 1e-6
-    relax = 0.01
+    relax = 0.1
     
     # Span-wise discretisation (can be higher than the number of provided foil sections)
     n_span = 20
@@ -362,7 +362,7 @@ def q4():
                     ia_2[m], it_2[m] = inductionFactors(r_2[m], r_2[l], beta_2[l], prop.char.z)
                 ua_2[l] = 0.5*singularIntegration(r_2, dg_dr_2*ia_2, r_2[l])*v[i]
                 ut_2[l] = 0.5*singularIntegration(r_2, dg_dr_2*it_2, r_2[l])*v[i]
-            print('nan in ut ua', np.sum(np.isnan(ut_2)), np.sum(np.isnan(ua_2)))
+            print('NaN in ut ua', np.sum(np.isnan(ut_2)), np.sum(np.isnan(ua_2)))
             if np.sum(np.isnan(ut_2)) > 0:
                 exit()
             ua_2[0] = 0.1
