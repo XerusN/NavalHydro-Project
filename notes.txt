@@ -1,0 +1,4 @@
+Debug q4:
+-   relax = 0.1 -> 1 crash
+    relax = 0.01 -> 38 crash    $
+    relax = 0.01 -> 350 crash   $ same rel_diff = 9.5 and gamma.sum = 600
