@@ -85,7 +85,6 @@ def import_cl(path) -> np.array:
         for j in range(cl_a.shape[1]):
             cl_a_2[i, j] = cl_a[i, j, 1]
     cl_a_2[cl_a.shape[0], :] = 0.
-    print(a)
     return cl_a, a, cl_a_2
 
 # Imports the geometry
@@ -101,16 +100,12 @@ def import_geometry(path: list) -> Geometry:
 # Interpolate Lift coefficient in the xfoil data
 def cl_from_xfoil(a: float, cl_a, section: int):
     cl_cubic = interpolate.CubicSpline(cl_a[section, :, 0], cl_a[section, :, 1])
-    #cl = np.interp(rad_to_deg(a), cl_a[section, :, 0], cl_a[section, :, 1])
     cl = cl_cubic(rad_to_deg(a))
     return cl
 
 def cl_from_xfoil_interp(aoa: float, r: float, a, cl_a_2, prop: Propeller):
-    
     r_a = prop.geo.r_R[:]*prop.char.d/2.
-    #print(rad_to_deg(aoa), r)
     cl = interpolate.interpn((r_a, a), cl_a_2, (r, rad_to_deg(aoa)), bounds_error=False)
-    #print(rad_to_deg(aoa), cl)
     return cl
 
 # n and V from prescribed Reynolds and j
@@ -175,7 +170,7 @@ def setup():
 
 def q2():
     
-    rn07, water, prop, j, cl_a = setup()
+    rn07, water, prop, j, cl_a, _, _ = setup()
     
     # angular and axial speed
     n, v = n_v_from_j_rn(j, rn07, water, prop)
@@ -221,7 +216,7 @@ def q3():
     tol = 1e-6
     relax = 0.1
     
-    rn07, water, prop, j, cl_a = setup()
+    rn07, water, prop, j, cl_a, _, _ = setup()
     
     # angular and axial speed
     n, v = n_v_from_j_rn(j, rn07, water, prop)
@@ -308,22 +303,16 @@ def q3():
     
     export('q3.txt', j, kt, kq, eta)
 
-def sinspace(start, end, num=50):
-    # Create a sinusoidal distribution over the interval
-    t = np.linspace(0, np.pi, num)  # Create a sine-shaped spacing
-    s = (1 - np.cos(t)) / 2         # Map cosine to [0, 1] for smoother spacing
-    return start + (end - start) * s
-
 # Lifting line with induction factors
 def q4():
     
     # iterations control varialbes
-    max_it = 3000
+    max_it = 1000
     tol = 1e-6
     relax = 0.01
     
     # Span-wise discretisation (can be higher than the number of provided foil sections)
-    n_span = 100
+    n_span = 40
     
     rn07, water, prop, j, cl_a, a, cl_a_2 = setup()
     
@@ -336,78 +325,68 @@ def q4():
     for i in range(len(j)):
         k = 0
         rel_diff = 1.
-        ut_2 = np.zeros(n_span)
-        ua_2 = np.zeros(n_span)
         
+        # Arrays initialisations
         # _2 indicates that the discretisation is the one controlled by n_span and not the provided geometry
-        gamma_2 = np.ones(n_span)*0.1
-        #gamma_2 = np.array([-((float(l) - float(n_span)/2.)/float(n_span))**2 + 1. for l in range(n_span)])
-        gamma_2[0] = 0.
-        gamma_2[-1] = 0.
-        gamma_new_2 = np.zeros(n_span)
-        cl = np.zeros(len(prop.geo.r_R))    # To ensure proper gamma at the tip, see later
-        cl_2 = np.zeros(n_span)
-        cd = np.zeros(len(prop.geo.r_R)-1)
-        dT_2 = np.zeros(n_span)
-        dQ_2 = np.zeros(n_span)
-        beta = np.zeros(len(prop.geo.r_R)-1)
-        beta_2 = np.zeros(n_span)
+        # Geometry
         r_2 = np.linspace(prop.geo.r_R[0]*prop.char.d/2., prop.geo.r_R[-1]*prop.char.d/2., n_span)
-        #r_2 = np.linspace(0.25*prop.char.d/2., prop.geo.r_R[-1]*prop.char.d/2., n_span)
-        #r_2 = sinspace(prop.geo.r_R[0]*prop.char.d/2., prop.geo.r_R[-1]*prop.char.d/2., n_span)
-        beta_2[:] = np.arctan(v[i]/(2*pi*r_2*n[i]))
         c_2 = np.interp(r_2, prop.geo.r_R*prop.char.d/2., prop.geo.c_d*prop.char.d)
         p_d_2 = np.interp(r_2, prop.geo.r_R*prop.char.d/2., prop.geo.p_d)
         r_R_2 = np.interp(r_2, prop.geo.r_R*prop.char.d/2., prop.geo.r_R)
         
-        plt.plot(r_2, gamma_2, 'x-', label=k)
-        o = 0
+        # Induced velocities
+        ut_2 = np.zeros(n_span)
+        ua_2 = np.zeros(n_span)
+        
+        # Circulation
+        gamma_2 = np.ones(n_span)*0.1
+        gamma_2[0] = 0.
+        gamma_2[-1] = 0.
+        gamma_new_2 = np.zeros(n_span)
+        
+        # Angles
+        aoa_2 = np.zeros(n_span)
+        theta_2 = np.zeros(n_span)
+        beta_2 = np.zeros(n_span)
+        beta_2[:] = np.arctan(v[i]/(2*pi*r_2*n[i]))
+        
+        # Forces
+        cl_2 = np.zeros(n_span)
+        cd = np.zeros(len(prop.geo.r_R))
+        dT_2 = np.zeros(n_span)
+        dQ_2 = np.zeros(n_span)
+        
         while k < max_it and rel_diff > tol:
             
             if k != 0:
-                theta_2 = np.arctan(p_d_2/(pi*r_R_2))
-                aoa_2 = theta_2 - beta_2
+                theta_2[:] = np.arctan(p_d_2[:]/(pi*r_R_2[:]))
+                aoa_2[:] = theta_2[:] - beta_2[:]
                 
                 # Lift from hydrodynamic pitch angle
                 for l in range(n_span):
                     cl_2[l] = cl_from_xfoil_interp(aoa_2[l], r_2[l], a, cl_a_2, prop)
-                #cl[0] = 0.         #debug
-                #cl[-1] = 0.     # No foil at the tip
-                print(cl_2)
-                #print('cl ', cl)
-                #cl_2 = np.interp(r_2, prop.geo.r_R[:]*prop.char.d/2., cl)
                 v_inf_2 = np.sqrt((v[i] + ua_2/2.)**2 + (2*r_2*pi*n[i] - ut_2/2.)**2)
-                #plt.plot(r_2, cl_2, 'x-', label=k+1)
                 
                 # Gamma update, under relaxation to improve convergence
                 gamma_new_2 = prop.char.z/2. * cl_2*v_inf_2*c_2
-                # if k < 50:
-                #     rel_diff = 1.
-                #else:
-                    # old_rel_diff = rel_diff
                 rel_diff = np.linalg.norm(gamma_new_2 - gamma_2) / np.mean(gamma_2)
-                    # relax = min(0.1, 1./rel_diff)
-                    
-                    # if abs(old_rel_diff-rel_diff)/rel_diff < 1e-6 and o > 20:
-                    #     relax *= 1.05
-                    #     o = 0
-                gamma_2 = gamma_2*(1-relax) + gamma_new_2*relax
+                gamma_2[:] = gamma_2[:]*(1-relax) + gamma_new_2[:]*relax
                 
                 gamma_2[0] = 0.
                 gamma_2[-1] = 0.
             
-            # if rel_diff > 1.:
-            #     for l in range(1, n_span-1):
-            #         gamma_2[l] = 0.5*(gamma_2[l-1] + gamma_2[l+1])
             
-            plt.plot(r_2, gamma_2, 'x-', label=k+1)
-            # Derivative of Gamma according to r
+            
+            # Derivative of Gamma according to r (finite difference)
             dg_dr_2 = np.zeros(n_span)
-            dg_dr_2[0] = (gamma_2[1] - gamma_2[0])/(r_2[1] - r_2[0])#/prop.char.z
-            dg_dr_2[-1] = (gamma_2[-1] - gamma_2[-2])/(r_2[-1] - r_2[-2])#/prop.char.z
+            dg_dr_2[0] = (gamma_2[1] - gamma_2[0])/(r_2[1] - r_2[0])
+            dg_dr_2[-1] = (gamma_2[-1] - gamma_2[-2])/(r_2[-1] - r_2[-2])
             for l in range(1, n_span-1):
-                dg_dr_2[l] = (gamma_2[l+1] - gamma_2[l-1])/(r_2[l+1] - r_2[l-1])#/prop.char.z
+                dg_dr_2[l] = (gamma_2[l+1] - gamma_2[l-1])/(r_2[l+1] - r_2[l-1])
             
+            # To have debug plots (uncomment one at a time)
+            # plt.plot(r_2, cl_2, 'x-', label=k+1)
+            # plt.plot(r_2, gamma_2, 'x-', label=k+1)
             #plt.plot(r_2, dg_dr_2, 'x-', label=k+1)
             
             ia_2 = np.zeros(n_span)
@@ -418,30 +397,33 @@ def q4():
                     ia_2[m], it_2[m] = inductionFactors(r_2[m], r_2[l], beta_2[m], prop.char.z)
                 ua_2[l] = singularIntegration(r_2, dg_dr_2*ia_2, r_2[l])/(2.*pi)
                 ut_2[l] = singularIntegration(r_2, dg_dr_2*it_2, r_2[l])/(2.*pi)
-            #print('NaN in ut ua', np.sum(np.isnan(ut_2)), np.sum(np.isnan(ua_2)))
-            if np.sum(np.isnan(ut_2)) > 0 or k > 3000:
-                plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-                plt.show()
+            
+            # Nan values appearance check
+            # Issue in the computation of the induction factor near the hub
+            if np.sum(np.isnan(ut_2)) > 0:
+                # # Show plots
+                # plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+                # plt.show()
                 print('EXIT - NaN Values')
                 exit()
             ua_2[0] = 0.
             ua_2[-1] = 0.
             ut_2[0] = 0.
             ut_2[-1] = 0.
+            
             # Hydrodynamic pitch angle
-            #print('ut ua ', ut_2, ua_2)
             beta_2 = np.arctan((v[i] + ua_2/2.)/(2*r_2*pi*n[i] - ut_2/2.))
-            #beta = np.interp(prop.geo.r_R[:-1]*prop.char.d/2., r_2, beta_2)
             k += 1
-            o += 1
-            #print('beta ', beta_2)
-            if k % 1 == 0:
+            if k % 10 == 0:
                 print(k, rel_diff, np.sum(gamma_2), relax, np.linalg.norm(ua_2), np.linalg.norm(ut_2))
-            #print('ooooooooooo')
         
         print(k, rel_diff)
         
-        plt.plot(r_2, gamma_2, label=i)
+        # # Show plots
+        # plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+        # plt.plot(r_2, gamma_2, label=i)
+        # plt.show()
+        
         # Derivative of Gamma according to r
         dg_dr_2 = np.zeros(n_span)
         dg_dr_2[0] = (gamma_2[1] - gamma_2[0])/(r_2[1] - r_2[0])
@@ -452,12 +434,12 @@ def q4():
         ia_2 = np.zeros(n_span)
         it_2 = np.zeros(n_span)
         
-        for l in range(n_span-1):
+        for l in range(1, n_span-1):
             # Induction factors
             for m in range(n_span):
                 ia_2[m], it_2[m] = inductionFactors(r_2[m], r_2[l], beta_2[l], prop.char.z)
-            ua_2[l] = 0.5*singularIntegration(r_2, dg_dr_2*ia_2, r_2[l])*v[i]
-            ut_2[l] = 0.5*singularIntegration(r_2, dg_dr_2*it_2, r_2[l])*v[i]
+            ua_2[l] = singularIntegration(r_2, dg_dr_2*ia_2, r_2[l])/(2*pi)
+            ut_2[l] = singularIntegration(r_2, dg_dr_2*it_2, r_2[l])/(2*pi)
         ua_2[0] = 0.
         ua_2[-1] = 0.
         ut_2[0] = 0.
@@ -465,30 +447,32 @@ def q4():
         
         # Hydrodynamic pitch angle
         beta_2 = np.arctan((v[i] + ua_2/2.)/(2*r_2*pi*n[i] - ut_2/2.))
-        beta = np.interp(prop.geo.r_R[:-1]*prop.char.d/2., r_2, beta_2)
-        ut = np.interp(prop.geo.r_R[:-1]*prop.char.d/2., r_2, ut_2)
-        ua = np.interp(prop.geo.r_R[:-1]*prop.char.d/2., r_2, ut_2)
         
-        for section in range(len(prop.geo.r_R)-1):
-            aoa_ = aoa(beta[section], prop, section)
-            cl[section] = cl_from_xfoil(aoa_, cl_a, section)
-        cl[-1] = 0.
-        v_inf = np.sqrt((v[i] + ua/2.)**2 + (prop.geo.r_R[:-1]*prop.char.d*pi*n[i] - ut/2.)**2)
-        cl_2 = np.interp(r_2, prop.geo.r_R[:]*prop.char.d/2., cl)
+        # Angle of attack
+        theta_2 = np.arctan(p_d_2/(pi*r_R_2))
+        aoa_2 = theta_2 - beta_2
+        
+        # Lift from hydrodynamic pitch angle
+        for l in range(n_span):
+            cl_2[l] = cl_from_xfoil_interp(aoa_2[l], r_2[l], a, cl_a_2, prop)
         v_inf_2 = np.sqrt((v[i] + ua_2/2.)**2 + (2*r_2*pi*n[i] - ut_2/2.)**2)
-        for section in range(len(prop.geo.r_R)-1):
+        
+        # Drag coefficient
+        v_inf = np.interp(prop.geo.r_R[:]*prop.char.d/2., r_2, v_inf_2)
+        for section in range(len(prop.geo.r_R)):
             cd[section] = cd_ittc(v_inf[section], prop, water, section)
-        cd_2 = np.interp(r_2, prop.geo.r_R[:-1]*prop.char.d/2., cd)
+        cd_2 = np.interp(r_2, prop.geo.r_R[:]*prop.char.d/2., cd)
+        
+        # Span 'covered' by a single foil section
         dr_2 = np.zeros(n_span)
         dr_2[0] = (r_2[1] - r_2[0])/2.
         dr_2[-1] = (r_2[-1] - r_2[-2])/2.
         for l in range(1, n_span-1):
             dr_2 = (r_2[l+1] - r_2[l-1])/2.
         
-        c = np.interp(r_2, prop.geo.r_R*prop.char.d/2., prop.geo.c_d*prop.char.d)
         # Drag and lift
-        dD_2 = water.density/2.*v_inf_2**2*cd_2*c*dr_2
-        dL_2 = water.density/2.*v_inf_2**2*cl_2*c*dr_2
+        dD_2 = water.density/2.*v_inf_2**2*cd_2*c_2*dr_2
+        dL_2 = water.density/2.*v_inf_2**2*cl_2*c_2*dr_2
         
         # Thrust abd torque
         dT_2[:] = dL_2*np.cos(beta_2) - dD_2*np.sin(beta_2)
@@ -496,12 +480,8 @@ def q4():
         T[i] += dT_2.sum()
         Q[i] += dQ_2.sum()
         
-        print(T*prop.char.z /(water.density * n**2 * prop.char.d**4))
-        exit()
-        
         print("----------")
     
-    plt.show()
     # K_T, K_Q and efficiency
     kt = T*prop.char.z /(water.density * n**2 * prop.char.d**4)
     kq = Q*prop.char.z /(water.density * n**2 * prop.char.d**5)
@@ -509,17 +489,17 @@ def q4():
     
     export('q4.txt', j, kt, kq, eta)
     
-# print("***************************")
-# print("q2")
-# print("***************************")
-# q2()
-# print()
-# print("***************************")
-# print("q3")
-# print("***************************")
-# print()
-# q3()
-# print()
+print("***************************")
+print("q2")
+print("***************************")
+q2()
+print()
+print("***************************")
+print("q3")
+print("***************************")
+print()
+q3()
+print()
 print("***************************")
 print("q4")
 print("***************************")
