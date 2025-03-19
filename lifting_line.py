@@ -78,7 +78,15 @@ def import_cl(path) -> np.array:
     cl_a.append(data)
     data = np.loadtxt(path+'results_900.txt', skiprows=2, delimiter = '|')
     cl_a.append(data)
-    return np.array(cl_a)
+    cl_a = np.array(cl_a)
+    a = cl_a[0, :, 0]
+    cl_a_2 = np.zeros((cl_a.shape[0]+1, cl_a.shape[1]))
+    for i in range(cl_a.shape[0]):
+        for j in range(cl_a.shape[1]):
+            cl_a_2[i, j] = cl_a[i, j, 1]
+    cl_a_2[cl_a.shape[0], :] = 0.
+    print(a)
+    return cl_a, a, cl_a_2
 
 # Imports the geometry
 def import_geometry(path: list) -> Geometry:
@@ -95,6 +103,14 @@ def cl_from_xfoil(a: float, cl_a, section: int):
     cl_cubic = interpolate.CubicSpline(cl_a[section, :, 0], cl_a[section, :, 1])
     #cl = np.interp(rad_to_deg(a), cl_a[section, :, 0], cl_a[section, :, 1])
     cl = cl_cubic(rad_to_deg(a))
+    return cl
+
+def cl_from_xfoil_interp(aoa: float, r: float, a, cl_a_2, prop: Propeller):
+    
+    r_a = prop.geo.r_R[:]*prop.char.d/2.
+    #print(rad_to_deg(aoa), r)
+    cl = interpolate.interpn((r_a, a), cl_a_2, (r, rad_to_deg(aoa)), bounds_error=False)
+    #print(rad_to_deg(aoa), cl)
     return cl
 
 # n and V from prescribed Reynolds and j
@@ -154,8 +170,8 @@ def setup():
 
     j = np.linspace(0.4, 1.1, 8)
     
-    cl_a = import_cl('./input/')
-    return rn07, water, prop, j, cl_a
+    cl_a, a, cl_a_2 = import_cl('./input/')
+    return rn07, water, prop, j, cl_a, a, cl_a_2
 
 def q2():
     
@@ -307,9 +323,9 @@ def q4():
     relax = 0.01
     
     # Span-wise discretisation (can be higher than the number of provided foil sections)
-    n_span = 40
+    n_span = 100
     
-    rn07, water, prop, j, cl_a = setup()
+    rn07, water, prop, j, cl_a, a, cl_a_2 = setup()
     
     # angular and axial speed
     n, v = n_v_from_j_rn(j, rn07, water, prop)
@@ -337,45 +353,54 @@ def q4():
         beta = np.zeros(len(prop.geo.r_R)-1)
         beta_2 = np.zeros(n_span)
         r_2 = np.linspace(prop.geo.r_R[0]*prop.char.d/2., prop.geo.r_R[-1]*prop.char.d/2., n_span)
+        #r_2 = np.linspace(0.25*prop.char.d/2., prop.geo.r_R[-1]*prop.char.d/2., n_span)
         #r_2 = sinspace(prop.geo.r_R[0]*prop.char.d/2., prop.geo.r_R[-1]*prop.char.d/2., n_span)
         beta_2[:] = np.arctan(v[i]/(2*pi*r_2*n[i]))
         c_2 = np.interp(r_2, prop.geo.r_R*prop.char.d/2., prop.geo.c_d*prop.char.d)
+        p_d_2 = np.interp(r_2, prop.geo.r_R*prop.char.d/2., prop.geo.p_d)
+        r_R_2 = np.interp(r_2, prop.geo.r_R*prop.char.d/2., prop.geo.r_R)
         
         plt.plot(r_2, gamma_2, 'x-', label=k)
-        
+        o = 0
         while k < max_it and rel_diff > tol:
-            # Lift from hydrodynamic pitch angle
-            for section in range(len(prop.geo.r_R)-1):
-                aoa_ = aoa(beta[section], prop, section)
-                cl[section] = cl_from_xfoil(aoa_, cl_a, section)
-            #cl[0] = 0.         #debug
-            cl[-1] = 0.     # No foil at the tip
-            #print('cl ', cl)
-            cl_2 = np.interp(r_2, prop.geo.r_R[:]*prop.char.d/2., cl)
-            v_inf_2 = np.sqrt((v[i] + ua_2/2.)**2 + (2*r_2*pi*n[i] - ut_2/2.)**2)
             
-            #plt.plot(r_2, cl_2, 'x-', label=k+1)
-            
-            # Gamma update, under relaxation to improve convergence
-            gamma_new_2 = prop.char.z/2. * cl_2*v_inf_2*c_2
-            if k == 0:
-                rel_diff = 1.
-            else:
-                old_rel_diff = rel_diff
+            if k != 0:
+                theta_2 = np.arctan(p_d_2/(pi*r_R_2))
+                aoa_2 = theta_2 - beta_2
+                
+                # Lift from hydrodynamic pitch angle
+                for l in range(n_span):
+                    cl_2[l] = cl_from_xfoil_interp(aoa_2[l], r_2[l], a, cl_a_2, prop)
+                #cl[0] = 0.         #debug
+                #cl[-1] = 0.     # No foil at the tip
+                print(cl_2)
+                #print('cl ', cl)
+                #cl_2 = np.interp(r_2, prop.geo.r_R[:]*prop.char.d/2., cl)
+                v_inf_2 = np.sqrt((v[i] + ua_2/2.)**2 + (2*r_2*pi*n[i] - ut_2/2.)**2)
+                #plt.plot(r_2, cl_2, 'x-', label=k+1)
+                
+                # Gamma update, under relaxation to improve convergence
+                gamma_new_2 = prop.char.z/2. * cl_2*v_inf_2*c_2
+                # if k < 50:
+                #     rel_diff = 1.
+                #else:
+                    # old_rel_diff = rel_diff
                 rel_diff = np.linalg.norm(gamma_new_2 - gamma_2) / np.mean(gamma_2)
-                # if abs(old_rel_diff-rel_diff)/rel_diff < 1e-4:
-                #     relax *= 2.if abs(old_rel_diff-rel_diff)/rel_diff < 1e-4:
-                #     relax *= 2.
-            gamma_2 = gamma_2*(1-relax) + gamma_new_2*relax
+                    # relax = min(0.1, 1./rel_diff)
+                    
+                    # if abs(old_rel_diff-rel_diff)/rel_diff < 1e-6 and o > 20:
+                    #     relax *= 1.05
+                    #     o = 0
+                gamma_2 = gamma_2*(1-relax) + gamma_new_2*relax
+                
+                gamma_2[0] = 0.
+                gamma_2[-1] = 0.
             
-            gamma_2[0] = 0.
-            gamma_2[-1] = 0.
-            
-            # if rel_diff > 15.:
+            # if rel_diff > 1.:
             #     for l in range(1, n_span-1):
             #         gamma_2[l] = 0.5*(gamma_2[l-1] + gamma_2[l+1])
             
-            #plt.plot(r_2, gamma_2, 'x-', label=k+1)
+            plt.plot(r_2, gamma_2, 'x-', label=k+1)
             # Derivative of Gamma according to r
             dg_dr_2 = np.zeros(n_span)
             dg_dr_2[0] = (gamma_2[1] - gamma_2[0])/(r_2[1] - r_2[0])#/prop.char.z
@@ -383,7 +408,7 @@ def q4():
             for l in range(1, n_span-1):
                 dg_dr_2[l] = (gamma_2[l+1] - gamma_2[l-1])/(r_2[l+1] - r_2[l-1])#/prop.char.z
             
-            plt.plot(r_2, dg_dr_2, 'x-', label=k+1)
+            #plt.plot(r_2, dg_dr_2, 'x-', label=k+1)
             
             ia_2 = np.zeros(n_span)
             it_2 = np.zeros(n_span)
@@ -394,7 +419,7 @@ def q4():
                 ua_2[l] = singularIntegration(r_2, dg_dr_2*ia_2, r_2[l])/(2.*pi)
                 ut_2[l] = singularIntegration(r_2, dg_dr_2*it_2, r_2[l])/(2.*pi)
             #print('NaN in ut ua', np.sum(np.isnan(ut_2)), np.sum(np.isnan(ua_2)))
-            if np.sum(np.isnan(ut_2)) > 0:
+            if np.sum(np.isnan(ut_2)) > 0 or k > 3000:
                 plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
                 plt.show()
                 print('EXIT - NaN Values')
@@ -403,15 +428,15 @@ def q4():
             ua_2[-1] = 0.
             ut_2[0] = 0.
             ut_2[-1] = 0.
-            
             # Hydrodynamic pitch angle
             #print('ut ua ', ut_2, ua_2)
             beta_2 = np.arctan((v[i] + ua_2/2.)/(2*r_2*pi*n[i] - ut_2/2.))
-            beta = np.interp(prop.geo.r_R[:-1]*prop.char.d/2., r_2, beta_2)
+            #beta = np.interp(prop.geo.r_R[:-1]*prop.char.d/2., r_2, beta_2)
             k += 1
+            o += 1
             #print('beta ', beta_2)
             if k % 1 == 0:
-                print(k, rel_diff, np.sum(gamma_2), relax)
+                print(k, rel_diff, np.sum(gamma_2), relax, np.linalg.norm(ua_2), np.linalg.norm(ut_2))
             #print('ooooooooooo')
         
         print(k, rel_diff)
@@ -433,8 +458,8 @@ def q4():
                 ia_2[m], it_2[m] = inductionFactors(r_2[m], r_2[l], beta_2[l], prop.char.z)
             ua_2[l] = 0.5*singularIntegration(r_2, dg_dr_2*ia_2, r_2[l])*v[i]
             ut_2[l] = 0.5*singularIntegration(r_2, dg_dr_2*it_2, r_2[l])*v[i]
-        ua_2[0] = 0.1
-        ua_2[-1] = 0.1
+        ua_2[0] = 0.
+        ua_2[-1] = 0.
         ut_2[0] = 0.
         ut_2[-1] = 0.
         
